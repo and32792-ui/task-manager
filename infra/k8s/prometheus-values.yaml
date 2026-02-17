@@ -1,0 +1,91 @@
+# kube-prometheus-stack Helm Chart Values
+# Install: helm install prometheus prometheus-community/kube-prometheus-stack -n monitoring -f prometheus-values.yaml
+
+# Prometheus configuration
+prometheus:
+  prometheusSpec:
+    replicas: 1
+    retention: 15d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 50Gi
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 1
+        memory: 2Gi
+
+# Grafana configuration
+grafana:
+  enabled: true
+  replicas: 1
+  adminPassword: "admin"  # Change in production
+  persistence:
+    enabled: true
+    size: 10Gi
+  service:
+    type: ClusterIP
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: 'task-manager'
+          orgId: 1
+          folder: 'Task Manager'
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/task-manager
+  dashboardsConfigMaps:
+    task-manager: 'task-manager-dashboard'
+  additionalDataSources:
+    - name: PostgreSQL
+      type: postgres
+      url: postgres.task-manager.svc.cluster.local:5432
+      database: taskmanager
+      user: taskmanager
+      secureJsonData:
+        password: ${PG_PASSWORD}
+      jsonData:
+        sslmode: disable
+        maxOpenConns: 10
+        maxIdleConns: 5
+        connMaxLifetime: 14400
+      editable: true
+
+# Alertmanager configuration
+alertmanager:
+  alertmanagerSpec:
+    replicas: 1
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+# Disable default rules we don't need
+defaultRules:
+  create: true
+  rules:
+    etcd: false
+    kubeScheduler: false
+    kubeControllerManager: false
+
+# Node Exporter
+nodeExporter:
+  enabled: true
+
+# kube-state-metrics
+kubeStateMetrics:
+  enabled: true

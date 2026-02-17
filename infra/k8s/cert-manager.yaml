@@ -1,0 +1,76 @@
+# cert-manager ClusterIssuer for self-signed certificates (development)
+# For production, use Let's Encrypt issuer
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+# Production issuer (requires DNS01 or HTTP01 challenge)
+# Uncomment and configure for production
+# apiVersion: cert-manager.io/v1
+# kind: ClusterIssuer
+# metadata:
+#   name: letsencrypt-prod
+# spec:
+#   acme:
+#     server: https://acme-v02.api.letsencrypt.org/directory
+#     email: your-email@example.com
+#     privateKeySecretRef:
+#       name: letsencrypt-prod
+#     solvers:
+#     - http01:
+#         ingress:
+#           class: nginx
+---
+# Certificate for Task Manager API
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: task-manager-api-tls
+  namespace: task-manager
+spec:
+  secretName: task-manager-api-tls
+  duration: 2160h  # 90 days
+  renewBefore: 360h  # 15 days
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+  dnsNames:
+    - task-manager-api.task-manager.svc.cluster.local
+    - api.taskmanager.local
+---
+# Certificate for Airflow
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: airflow-tls
+  namespace: airflow
+spec:
+  secretName: airflow-tls
+  duration: 2160h
+  renewBefore: 360h
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+  dnsNames:
+    - airflow.airflow.svc.cluster.local
+    - airflow.local
+---
+# Certificate for Grafana
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: grafana-tls
+  namespace: monitoring
+spec:
+  secretName: grafana-tls
+  duration: 2160h
+  renewBefore: 360h
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+  dnsNames:
+    - grafana.monitoring.svc.cluster.local
+    - grafana.local

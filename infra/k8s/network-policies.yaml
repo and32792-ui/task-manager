@@ -1,0 +1,227 @@
+# Network Policies for Task Manager
+# Restrict traffic between namespaces and pods
+
+# ─── Task Manager Namespace ────────────────────────────────────────────────
+---
+# Allow API to receive traffic from ingress only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: task-manager-api-ingress
+  namespace: task-manager
+spec:
+  podSelector:
+    matchLabels:
+      app: task-manager-api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 3000
+    # Allow health checks from prometheus
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 3000
+  egress:
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow PostgreSQL
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Allow Kafka
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kafka
+      ports:
+        - protocol: TCP
+          port: 9092
+    # Allow Ozone S3 Gateway
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ozone
+      ports:
+        - protocol: TCP
+          port: 9878
+---
+# Allow PostgreSQL to receive connections from API and Spark only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-restrict-access
+  namespace: task-manager
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: task-manager-api
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: spark
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: airflow
+      ports:
+        - protocol: TCP
+          port: 5432
+
+# ─── Spark Namespace ────────────────────────────────────────────────────────
+---
+# Allow Spark pods to communicate with each other and external services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: spark-allow-internal
+  namespace: spark
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow Spark driver/executor communication
+    - from:
+        - podSelector: {}
+  egress:
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow Kafka
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kafka
+      ports:
+        - protocol: TCP
+          port: 9092
+    # Allow Ozone
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ozone
+      ports:
+        - protocol: TCP
+          port: 9878
+          - protocol: TCP
+          port: 9874
+        - protocol: TCP
+          port: 9876
+    # Allow PostgreSQL
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: task-manager
+      ports:
+        - protocol: TCP
+          port: 5432
+
+# ─── Airflow Namespace ──────────────────────────────────────────────────────
+---
+# Allow Airflow to access K8s API and Spark
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: airflow-allow-required
+  namespace: airflow
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow ingress traffic to webserver
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow Kubernetes API
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 443
+    # Allow PostgreSQL (for Airflow metadata and task manager)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: task-manager
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Allow Spark namespace (to submit jobs)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: spark
+
+# ─── Ozone Namespace ────────────────────────────────────────────────────────
+---
+# Allow Ozone internal communication and client access
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ozone-allow-clients
+  namespace: ozone
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow internal Ozone communication
+    - from:
+        - podSelector: {}
+    # Allow access from task-manager, spark, airflow
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: task-manager
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: spark
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: airflow
+  egress:
+    # Allow all egress for Ozone internal communication
+    - {}

@@ -1,0 +1,82 @@
+# ServiceMonitor for Task Manager API
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: task-manager-api
+  namespace: monitoring
+  labels:
+    release: prometheus
+    app: task-manager-api
+spec:
+  selector:
+    matchLabels:
+      app: task-manager-api
+  namespaceSelector:
+    matchNames:
+      - task-manager
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+# ServiceMonitor for PostgreSQL (if using postgres-exporter)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: postgres-exporter
+  namespace: monitoring
+  labels:
+    release: prometheus
+    app: postgres-exporter
+spec:
+  selector:
+    matchLabels:
+      app: postgres-exporter
+  namespaceSelector:
+    matchNames:
+      - task-manager
+  endpoints:
+    - port: metrics
+      interval: 30s
+---
+# ServiceMonitor for Kafka (if using kafka-exporter)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kafka-exporter
+  namespace: monitoring
+  labels:
+    release: prometheus
+    app: kafka-exporter
+spec:
+  selector:
+    matchLabels:
+      app: kafka-exporter
+  namespaceSelector:
+    matchNames:
+      - kafka
+  endpoints:
+    - port: metrics
+      interval: 30s
+---
+# PodMonitor for Spark jobs
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: spark-jobs
+  namespace: monitoring
+  labels:
+    release: prometheus
+    app: spark
+spec:
+  selector:
+    matchLabels:
+      spark-role: driver
+  namespaceSelector:
+    matchNames:
+      - spark
+  podMetricsEndpoints:
+    - port: spark-ui
+      interval: 30s
+      path: /metrics/executors/prometheus
