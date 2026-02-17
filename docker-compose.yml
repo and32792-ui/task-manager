@@ -1,0 +1,185 @@
+version: "3.9"
+
+services:
+  # ─── PostgreSQL ───────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: taskmanager-postgres
+    environment:
+      POSTGRES_DB: taskmanager
+      POSTGRES_USER: taskmanager
+      POSTGRES_PASSWORD: taskmanager
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taskmanager"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ─── Kafka (KRaft mode — no Zookeeper) ───────────────────
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: taskmanager-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,INTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:29092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  # ─── Kafka Connect (Debezium) ────────────────────────────
+  kafka-connect:
+    image: debezium/connect:2.5
+    container_name: taskmanager-debezium
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      BOOTSTRAP_SERVERS: kafka:29092
+      GROUP_ID: debezium-connect
+      CONFIG_STORAGE_TOPIC: debezium_configs
+      OFFSET_STORAGE_TOPIC: debezium_offsets
+      STATUS_STORAGE_TOPIC: debezium_statuses
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+    ports:
+      - "8083:8083"
+
+  # ─── Kafka UI (optional — for debugging) ─────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: taskmanager-kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: debezium
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://kafka-connect:8083
+    ports:
+      - "8080:8080"
+
+  # ─── Apache Ozone SCM (Storage Container Manager) ────────
+  ozone-scm:
+    image: apache/ozone:1.4.0
+    container_name: taskmanager-ozone-scm
+    hostname: ozone-scm
+    command: ["ozone", "scm"]
+    environment:
+      ENSURE_SCM_INITIALIZED: /data/metadata/scm/current/VERSION
+      OZONE-SITE.XML_ozone.om.address: ozone-om
+      OZONE-SITE.XML_ozone.scm.names: ozone-scm
+      OZONE-SITE.XML_ozone.scm.datanode.id.dir: /data/metadata
+      OZONE-SITE.XML_ozone.scm.block.client.address: ozone-scm
+      OZONE-SITE.XML_ozone.scm.client.address: ozone-scm
+      OZONE-SITE.XML_ozone.metadata.dirs: /data/metadata
+      OZONE-SITE.XML_ozone.replication: "1"
+      OZONE-SITE.XML_ozone.replication.type: RATIS
+      OZONE-SITE.XML_ozone.scm.pipeline.creation.interval: 30s
+      OZONE-SITE.XML_hdds.scm.safemode.min.datanode: "1"
+    volumes:
+      - ozone-scm-data:/data
+    ports:
+      - "9876:9876"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9876 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ─── Apache Ozone OM (Ozone Manager) ─────────────────────
+  ozone-om:
+    image: apache/ozone:1.4.0
+    container_name: taskmanager-ozone-om
+    hostname: ozone-om
+    command: ["ozone", "om"]
+    environment:
+      ENSURE_OM_INITIALIZED: /data/metadata/om/current/VERSION
+      OZONE-SITE.XML_ozone.om.address: ozone-om
+      OZONE-SITE.XML_ozone.scm.names: ozone-scm
+      OZONE-SITE.XML_ozone.scm.client.address: ozone-scm
+      OZONE-SITE.XML_ozone.scm.block.client.address: ozone-scm
+      OZONE-SITE.XML_ozone.metadata.dirs: /data/metadata
+      OZONE-SITE.XML_ozone.replication: "1"
+      OZONE-SITE.XML_ozone.replication.type: RATIS
+    depends_on:
+      ozone-scm:
+        condition: service_healthy
+    volumes:
+      - ozone-om-data:/data
+    ports:
+      - "9874:9874"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9874 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ─── Apache Ozone DataNode ───────────────────────────────
+  ozone-datanode:
+    image: apache/ozone:1.4.0
+    container_name: taskmanager-ozone-datanode
+    hostname: ozone-datanode
+    command: ["ozone", "datanode"]
+    environment:
+      OZONE-SITE.XML_ozone.om.address: ozone-om
+      OZONE-SITE.XML_ozone.scm.names: ozone-scm
+      OZONE-SITE.XML_ozone.scm.client.address: ozone-scm
+      OZONE-SITE.XML_ozone.scm.block.client.address: ozone-scm
+      OZONE-SITE.XML_ozone.scm.datanode.id.dir: /data/metadata
+      OZONE-SITE.XML_ozone.metadata.dirs: /data/metadata
+      OZONE-SITE.XML_hdds.datanode.dir: /data/hdds
+      OZONE-SITE.XML_ozone.replication: "1"
+      OZONE-SITE.XML_ozone.replication.type: RATIS
+    depends_on:
+      ozone-scm:
+        condition: service_healthy
+    volumes:
+      - ozone-dn-data:/data
+
+  # ─── Apache Ozone S3 Gateway ─────────────────────────────
+  ozone-s3g:
+    image: apache/ozone:1.4.0
+    container_name: taskmanager-ozone-s3g
+    hostname: ozone-s3g
+    command: ["ozone", "s3g"]
+    environment:
+      OZONE-SITE.XML_ozone.om.address: ozone-om
+      OZONE-SITE.XML_ozone.scm.names: ozone-scm
+      OZONE-SITE.XML_ozone.scm.client.address: ozone-scm
+      OZONE-SITE.XML_ozone.s3g.http-address: "0.0.0.0:9878"
+    depends_on:
+      ozone-om:
+        condition: service_healthy
+    ports:
+      - "9878:9878"
+
+volumes:
+  pgdata:
+  ozone-scm-data:
+  ozone-om-data:
+  ozone-dn-data:

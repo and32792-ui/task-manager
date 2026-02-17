@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-manager-api
+  namespace: task-manager
+  labels:
+    app: task-manager-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: task-manager-api
+  template:
+    metadata:
+      labels:
+        app: task-manager-api
+    spec:
+      containers:
+        - name: api
+          image: task-manager-api:latest
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: task-manager-config
+            - secretRef:
+                name: task-manager-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: task-manager-api
+  namespace: task-manager
+spec:
+  selector:
+    app: task-manager-api
+  ports:
+    - port: 80
+      targetPort: 3000
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: task-manager-config
+  namespace: task-manager
+data:
+  PORT: "3000"
+  PG_HOST: "postgres.task-manager.svc.cluster.local"
+  PG_PORT: "5432"
+  PG_DATABASE: "taskmanager"
+  PG_POOL_MAX: "20"
+  KAFKA_BROKERS: "kafka-bootstrap.kafka.svc.cluster.local:9092"
+  KAFKA_CLIENT_ID: "task-manager-api"
+  KAFKA_TOPIC: "task-events"
+  OZONE_S3_ENDPOINT: "http://ozone-s3g.ozone.svc.cluster.local:9878"
+  OZONE_REGION: "us-east-1"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: task-manager-secrets
+  namespace: task-manager
+type: Opaque
+stringData:
+  PG_USER: "taskmanager"
+  PG_PASSWORD: "CHANGE_ME_IN_PRODUCTION"
+  OZONE_ACCESS_KEY: "CHANGE_ME"
+  OZONE_SECRET_KEY: "CHANGE_ME"

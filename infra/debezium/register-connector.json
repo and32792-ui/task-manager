@@ -1,0 +1,24 @@
+{
+  "name": "taskmanager-postgres-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "taskmanager",
+    "database.password": "taskmanager",
+    "database.dbname": "taskmanager",
+    "topic.prefix": "task-cdc",
+    "table.include.list": "public.tasks",
+    "plugin.name": "pgoutput",
+    "publication.autocreate.mode": "filtered",
+    "slot.name": "debezium_tasks",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": false,
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": false,
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": false,
+    "transforms.unwrap.delete.handling.mode": "rewrite"
+  }
+}

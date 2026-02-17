@@ -1,0 +1,273 @@
+---
+# Ozone ConfigMap — shared configuration for all Ozone components
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ozone-config
+  namespace: ozone
+data:
+  OZONE-SITE.XML_ozone.om.address: "ozone-om.ozone.svc.cluster.local"
+  OZONE-SITE.XML_ozone.scm.names: "ozone-scm.ozone.svc.cluster.local"
+  OZONE-SITE.XML_ozone.scm.client.address: "ozone-scm.ozone.svc.cluster.local"
+  OZONE-SITE.XML_ozone.scm.block.client.address: "ozone-scm.ozone.svc.cluster.local"
+  OZONE-SITE.XML_ozone.scm.datanode.id.dir: "/data/metadata"
+  OZONE-SITE.XML_ozone.metadata.dirs: "/data/metadata"
+  OZONE-SITE.XML_hdds.datanode.dir: "/data/hdds"
+  OZONE-SITE.XML_ozone.replication: "3"
+  OZONE-SITE.XML_ozone.replication.type: "RATIS"
+  OZONE-SITE.XML_ozone.s3g.http-address: "0.0.0.0:9878"
+  OZONE-SITE.XML_hdds.scm.safemode.min.datanode: "3"
+
+---
+# SCM — Storage Container Manager
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ozone-scm
+  namespace: ozone
+spec:
+  serviceName: ozone-scm
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ozone-scm
+  template:
+    metadata:
+      labels:
+        app: ozone-scm
+    spec:
+      containers:
+        - name: scm
+          image: apache/ozone:1.4.0
+          command: ["ozone", "scm"]
+          envFrom:
+            - configMapRef:
+                name: ozone-config
+          env:
+            - name: ENSURE_SCM_INITIALIZED
+              value: /data/metadata/scm/current/VERSION
+          ports:
+            - containerPort: 9876
+              name: rpc
+            - containerPort: 9860
+              name: http
+          volumeMounts:
+            - name: scm-data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 9876
+            initialDelaySeconds: 30
+            periodSeconds: 10
+  volumeClaimTemplates:
+    - metadata:
+        name: scm-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ozone-scm
+  namespace: ozone
+spec:
+  selector:
+    app: ozone-scm
+  ports:
+    - port: 9876
+      targetPort: 9876
+      name: rpc
+    - port: 9860
+      targetPort: 9860
+      name: http
+  clusterIP: None
+
+---
+# OM — Ozone Manager
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ozone-om
+  namespace: ozone
+spec:
+  serviceName: ozone-om
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ozone-om
+  template:
+    metadata:
+      labels:
+        app: ozone-om
+    spec:
+      containers:
+        - name: om
+          image: apache/ozone:1.4.0
+          command: ["ozone", "om"]
+          envFrom:
+            - configMapRef:
+                name: ozone-config
+          env:
+            - name: ENSURE_OM_INITIALIZED
+              value: /data/metadata/om/current/VERSION
+          ports:
+            - containerPort: 9874
+              name: rpc
+            - containerPort: 9862
+              name: http
+          volumeMounts:
+            - name: om-data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 9874
+            initialDelaySeconds: 30
+            periodSeconds: 10
+  volumeClaimTemplates:
+    - metadata:
+        name: om-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ozone-om
+  namespace: ozone
+spec:
+  selector:
+    app: ozone-om
+  ports:
+    - port: 9874
+      targetPort: 9874
+      name: rpc
+    - port: 9862
+      targetPort: 9862
+      name: http
+  clusterIP: None
+
+---
+# DataNodes
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ozone-datanode
+  namespace: ozone
+spec:
+  serviceName: ozone-datanode
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ozone-datanode
+  template:
+    metadata:
+      labels:
+        app: ozone-datanode
+    spec:
+      containers:
+        - name: datanode
+          image: apache/ozone:1.4.0
+          command: ["ozone", "datanode"]
+          envFrom:
+            - configMapRef:
+                name: ozone-config
+          volumeMounts:
+            - name: dn-data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+  volumeClaimTemplates:
+    - metadata:
+        name: dn-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 100Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ozone-datanode
+  namespace: ozone
+spec:
+  selector:
+    app: ozone-datanode
+  ports:
+    - port: 9882
+      targetPort: 9882
+  clusterIP: None
+
+---
+# S3 Gateway
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ozone-s3g
+  namespace: ozone
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ozone-s3g
+  template:
+    metadata:
+      labels:
+        app: ozone-s3g
+    spec:
+      containers:
+        - name: s3g
+          image: apache/ozone:1.4.0
+          command: ["ozone", "s3g"]
+          envFrom:
+            - configMapRef:
+                name: ozone-config
+          ports:
+            - containerPort: 9878
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ozone-s3g
+  namespace: ozone
+spec:
+  selector:
+    app: ozone-s3g
+  ports:
+    - port: 9878
+      targetPort: 9878
+  type: ClusterIP

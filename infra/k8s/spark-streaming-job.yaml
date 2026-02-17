@@ -1,0 +1,86 @@
+# Requires the Spark Operator: https://github.com/kubeflow/spark-operator
+# Install: helm install spark-operator spark-operator/spark-operator --namespace spark
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: streaming-ingestion
+  namespace: spark
+spec:
+  type: Scala
+  mode: cluster
+  image: task-manager-spark:latest
+  imagePullPolicy: Always
+  mainClass: com.taskmanager.spark.StreamingIngestion
+  mainApplicationFile: local:///opt/spark/jars/task-manager-spark.jar
+  sparkVersion: "3.5.1"
+  restartPolicy:
+    type: Always
+    onFailureRetries: 3
+    onFailureRetryInterval: 60
+    onSubmissionFailureRetries: 3
+    onSubmissionFailureRetryInterval: 30
+  sparkConf:
+    spark.sql.streaming.checkpointLocation: "s3a://taskmanager.checkpoints/streaming-ingestion"
+    spark.hadoop.fs.s3a.endpoint: "http://ozone-s3g.ozone.svc.cluster.local:9878"
+    spark.hadoop.fs.s3a.access.key: "ozone-access-key"
+    spark.hadoop.fs.s3a.secret.key: "ozone-secret-key"
+    spark.hadoop.fs.s3a.path.style.access: "true"
+    spark.hadoop.fs.s3a.impl: "org.apache.hadoop.fs.s3a.S3AFileSystem"
+    spark.hadoop.fs.s3a.connection.ssl.enabled: "false"
+    spark.hadoop.fs.s3a.change.detection.mode: "none"
+    spark.kubernetes.namespace: spark
+  driver:
+    cores: 1
+    coreLimit: "1200m"
+    memory: "1g"
+    labels:
+      app: streaming-ingestion
+      role: driver
+    serviceAccount: spark-operator-spark
+    env:
+      - name: KAFKA_BROKERS
+        value: "kafka-bootstrap.kafka.svc.cluster.local:9092"
+      - name: OZONE_S3_ENDPOINT
+        value: "http://ozone-s3g.ozone.svc.cluster.local:9878"
+      - name: OZONE_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: ozone-credentials
+            key: access-key
+      - name: OZONE_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: ozone-credentials
+            key: secret-key
+  executor:
+    cores: 1
+    instances: 2
+    memory: "1g"
+    labels:
+      app: streaming-ingestion
+      role: executor
+    env:
+      - name: KAFKA_BROKERS
+        value: "kafka-bootstrap.kafka.svc.cluster.local:9092"
+      - name: OZONE_S3_ENDPOINT
+        value: "http://ozone-s3g.ozone.svc.cluster.local:9878"
+      - name: OZONE_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: ozone-credentials
+            key: access-key
+      - name: OZONE_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: ozone-credentials
+            key: secret-key
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ozone-credentials
+  namespace: spark
+type: Opaque
+stringData:
+  access-key: "CHANGE_ME"
+  secret-key: "CHANGE_ME"
