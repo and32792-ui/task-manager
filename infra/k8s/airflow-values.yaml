@@ -1,0 +1,102 @@
+# Airflow Helm Chart Values
+# Install: helm install airflow apache-airflow/airflow -n airflow -f airflow-values.yaml
+
+# Airflow version
+airflowVersion: "2.8.0"
+defaultAirflowTag: "2.8.0"
+
+# Airflow configuration
+config:
+  core:
+    dags_folder: /opt/airflow/dags
+    load_examples: False
+    executor: KubernetesExecutor
+  kubernetes:
+    namespace: airflow
+    pod_template_file: /opt/airflow/pod_templates/pod_template.yaml
+  webserver:
+    expose_config: True
+    rbac: True
+
+# Webserver configuration
+webserver:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 1
+      memory: 2Gi
+  service:
+    type: ClusterIP
+    ports:
+      - name: airflow-ui
+        port: 8080
+        targetPort: 8080
+
+# Scheduler configuration
+scheduler:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 1
+      memory: 2Gi
+
+# DAGs configuration - mount from ConfigMap or Git
+dags:
+  gitSync:
+    enabled: true
+    repo: "https://github.com/and32792-ui/task-manager.git"
+    branch: "main"
+    subPath: "airflow/dags"
+    syncWait: 60
+    sshKeySecret: ~
+
+# Logs configuration
+logs:
+  persistence:
+    enabled: true
+    size: 10Gi
+
+# PostgreSQL for Airflow metadata (internal)
+postgresql:
+  enabled: true
+  auth:
+    username: airflow
+    password: airflow
+    database: airflow
+
+# Service Account
+serviceAccount:
+  create: true
+  name: airflow-worker
+
+# RBAC
+rbac:
+  create: true
+
+# Extra environment variables
+extraEnv:
+  - name: AIRFLOW__KUBERNETES__WORKER_CONTAINER_REPOSITORY
+    value: "task-manager-spark"
+  - name: AIRFLOW__KUBERNETES__WORKER_CONTAINER_TAG
+    value: "latest"
+
+# Security context
+securityContext:
+  runAsUser: 50000
+  fsGroup: 50000
+
+# Ingress configuration
+ingress:
+  web:
+    enabled: true
+    ingressClassName: nginx
+    hosts:
+      - name: airflow.local
+        tls:
+          enabled: false

@@ -1,0 +1,152 @@
+# Spark ETL Batch Job - SparkApplication CRD
+# Triggered by Airflow or manual submission
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: etl-batch-job
+  namespace: spark
+  labels:
+    app: etl-batch
+    type: batch
+spec:
+  type: Scala
+  mode: cluster
+  image: task-manager-spark:latest
+  imagePullPolicy: Always
+  mainClass: com.taskmanager.spark.EtlBatchJob
+  mainApplicationFile: local:///opt/spark/jars/task-manager-spark.jar
+  sparkVersion: "3.5.1"
+  restartPolicy:
+    type: Never  # Batch jobs don't auto-restart
+  sparkConf:
+    spark.sql.adaptive.enabled: "true"
+    spark.sql.adaptive.coalescePartitions.enabled: "true"
+    spark.hadoop.fs.s3a.endpoint: "http://ozone-s3g.ozone.svc.cluster.local:9878"
+    spark.hadoop.fs.s3a.access.key: "ozone-access-key"
+    spark.hadoop.fs.s3a.secret.key: "ozone-secret-key"
+    spark.hadoop.fs.s3a.path.style.access: "true"
+    spark.hadoop.fs.s3a.impl: "org.apache.hadoop.fs.s3a.S3AFileSystem"
+    spark.hadoop.fs.s3a.connection.ssl.enabled: "false"
+    spark.kubernetes.namespace: spark
+  arguments:
+    - "{{ ds }}"  # Date argument passed by Airflow
+  driver:
+    cores: 1
+    coreLimit: "1200m"
+    memory: "1g"
+    labels:
+      app: etl-batch
+      role: driver
+    serviceAccount: spark-operator-spark
+    env:
+      - name: KAFKA_BROKERS
+        value: "kafka-bootstrap.kafka.svc.cluster.local:9092"
+      - name: OZONE_S3_ENDPOINT
+        value: "http://ozone-s3g.ozone.svc.cluster.local:9878"
+      - name: OZONE_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: ozone-credentials
+            key: access-key
+      - name: OZONE_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: ozone-credentials
+            key: secret-key
+  executor:
+    cores: 1
+    instances: 2
+    memory: "1g"
+    labels:
+      app: etl-batch
+      role: executor
+    env:
+      - name: OZONE_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: ozone-credentials
+            key: access-key
+      - name: OZONE_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: ozone-credentials
+            key: secret-key
+---
+# Spark Analytics Aggregation Job - SparkApplication CRD
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: analytics-aggregation-job
+  namespace: spark
+  labels:
+    app: analytics-aggregation
+    type: batch
+spec:
+  type: Scala
+  mode: cluster
+  image: task-manager-spark:latest
+  imagePullPolicy: Always
+  mainClass: com.taskmanager.spark.AnalyticsAggregationJob
+  mainApplicationFile: local:///opt/spark/jars/task-manager-spark.jar
+  sparkVersion: "3.5.1"
+  restartPolicy:
+    type: Never
+  sparkConf:
+    spark.sql.adaptive.enabled: "true"
+    spark.hadoop.fs.s3a.endpoint: "http://ozone-s3g.ozone.svc.cluster.local:9878"
+    spark.hadoop.fs.s3a.access.key: "ozone-access-key"
+    spark.hadoop.fs.s3a.secret.key: "ozone-secret-key"
+    spark.hadoop.fs.s3a.path.style.access: "true"
+    spark.hadoop.fs.s3a.impl: "org.apache.hadoop.fs.s3a.S3AFileSystem"
+    spark.hadoop.fs.s3a.connection.ssl.enabled: "false"
+    spark.kubernetes.namespace: spark
+  arguments:
+    - "{{ ds }}"
+  driver:
+    cores: 1
+    coreLimit: "1200m"
+    memory: "1g"
+    labels:
+      app: analytics-aggregation
+      role: driver
+    serviceAccount: spark-operator-spark
+    env:
+      - name: PG_URL
+        value: "jdbc:postgresql://postgres.task-manager.svc.cluster.local:5432/taskmanager"
+      - name: PG_USER
+        value: "taskmanager"
+      - name: PG_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: task-manager-secrets
+            key: PG_PASSWORD
+      - name: OZONE_S3_ENDPOINT
+        value: "http://ozone-s3g.ozone.svc.cluster.local:9878"
+      - name: OZONE_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: ozone-credentials
+            key: access-key
+      - name: OZONE_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: ozone-credentials
+            key: secret-key
+  executor:
+    cores: 1
+    instances: 2
+    memory: "1g"
+    labels:
+      app: analytics-aggregation
+      role: executor
+    env:
+      - name: OZONE_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: ozone-credentials
+            key: access-key
+      - name: OZONE_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: ozone-credentials
+            key: secret-key
